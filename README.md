@@ -8,7 +8,7 @@ The Solana Program IDL pipeline is extremely convoluted. One might even argue th
 ```mermaid
 flowchart TD
     A[SVM Program] -->|*Generates via* IDL Parser| B[IDL JSON File]
-    B  --> |*Feeds into*| C[Revese IDL Parser]
+    B  --> |*Feeds into*| C[Reverse IDL Parser]
     E[Account Data] -.-> |*Queries with* Raw Account Data| D 
     G[Instruction Data] -.-> |*Queries with* Raw Instruction Data| D
     C -->|*Generates via* Schema Parser| D[Schema Nodes] -.-> |*Generates via* Value Parser| F[Value Nodes] -.-> |*Derives*| H[Formatted JSON Data]  
