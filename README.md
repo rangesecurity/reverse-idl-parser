@@ -11,7 +11,7 @@ flowchart TD
     B  --> |*Feeds into*| C[Revese IDL Parser]
     E[Account Data] -.-> |*Queries with* Raw Account Data| D 
     G[Instruction Data] -.-> |*Queries with* Raw Instruction Data| D
-    C -->|*Generates via* Schema Parser| D[Schema Nodes] -.-> |*Generates via* Value Parser| F[Value Nodes] -.-> |*Derives from* Value Node| H[Formatted JSON Data]  
+    C -->|*Generates via* Schema Parser| D[Schema Nodes] -.-> |*Generates via* Value Parser| F[Value Nodes] -.-> |*Derives*| H[Formatted JSON Data]  
 ```
 
 This library can convert a JSON IDL string into an intermediate Rust `SchemaNode` type. The `SchemaNode` is a recursively defined type that can receive opaque byte object as input and decode those bytes into a `ValueNode` (another recursively defined type). Serializing the `ValueNode` will yield the parsed byte object as human-readable JSON.
