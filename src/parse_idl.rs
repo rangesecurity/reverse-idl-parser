@@ -282,7 +282,11 @@ fn camel_to_snake_case(s: &str) -> String {
 
     while let Some(c) = chars.next() {
         if c.is_uppercase() {
-            if !result.is_empty() && chars.peek().map_or(false, |next| next.is_lowercase()) {
+            if !result.is_empty()
+                && chars
+                    .peek()
+                    .map_or(false, |next| next.is_lowercase() || next.is_ascii_digit())
+            {
                 result.push('_');
             }
             result.push(c.to_lowercase().next().unwrap());
