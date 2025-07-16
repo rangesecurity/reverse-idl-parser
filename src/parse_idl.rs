@@ -504,6 +504,7 @@ fn parse_raw_schema_type(name: &str) -> SchemaType {
 
 #[cfg(test)]
 mod test {
+    use super::camel_to_snake_case;
     use solana_program::hash::hash;
 
     #[test]
@@ -512,5 +513,17 @@ mod test {
         println!("{:x}", u64::from_be_bytes(b[..8].try_into().unwrap()));
         let a = hash(&format!("account:{}", "State").into_bytes()).to_bytes();
         println!("{:x}", u64::from_be_bytes(a[..8].try_into().unwrap()));
+    }
+
+    #[test]
+    fn test_camel_to_snake_case() {
+        assert_eq!(camel_to_snake_case("mintV1"), "mint_v1");
+        assert_eq!(camel_to_snake_case("CreateTree"), "create_tree");
+        assert_eq!(camel_to_snake_case("CancelRedeem"), "cancel_redeem");
+        assert_eq!(
+            camel_to_snake_case("NFTMetadataUpdate"),
+            "nft_metadata_update"
+        );
+        assert_eq!(camel_to_snake_case("doAbc123"), "do_abc123");
     }
 }
