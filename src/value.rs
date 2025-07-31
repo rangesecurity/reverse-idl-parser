@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use serde::{ser::SerializeMap, Serialize, Serializer};
 use solana_program::pubkey::Pubkey;
 
@@ -54,6 +56,8 @@ pub enum TypedValue {
     Vec(Vec<TypedValue>),
     /// list of fields, the name of struct is stored in the outer ValueNode
     Struct(Vec<ValueNode>),
+    /// Vec of bytes
+    Bytes(Vec<u8>),
 }
 
 impl TypedValue {
@@ -151,6 +155,7 @@ impl Serialize for TypedValue {
                 }
                 state.end()
             }
+            TypedValue::Bytes(v) => STANDARD.encode(v).serialize(serializer),
         }
     }
 }

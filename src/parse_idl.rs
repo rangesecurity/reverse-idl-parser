@@ -285,7 +285,7 @@ fn camel_to_snake_case(s: &str) -> String {
             if !result.is_empty()
                 && chars
                     .peek()
-                    .map_or(false, |next| next.is_lowercase() || next.is_ascii_digit())
+                    .is_some_and(|next| next.is_lowercase() || next.is_ascii_digit())
             {
                 result.push('_');
             }
@@ -452,7 +452,7 @@ impl IdlParser {
                         .and_then(|v| v.as_u64())
                         .ok_or("Array size is not a u64")? as usize;
 
-                    let value = inner_array.get(0).ok_or("Array value not found")?;
+                    let value = inner_array.first().ok_or("Array value not found")?;
                     if value.is_object() {
                         self.parse_field_inner(value)?
                     } else {
