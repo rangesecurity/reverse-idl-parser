@@ -211,4 +211,50 @@ mod tests {
         let serialized = serde_json::to_string_pretty(&schema).unwrap();
         println!("{}", serialized);
     }
+    #[test]
+    fn deserialize_vec_u8_as_bytes() {
+        use borsh::BorshSerialize;
+
+        // Schema with a single `bytes` field: "transactionMessage": Vec<u8>
+        let schema = SchemaNode::new_struct(
+            "VaultTransactionCreateArgs",
+            vec![
+                ("vaultIndex", SchemaType::U8),
+                ("ephemeralSigners", SchemaType::U8),
+                ("transactionMessage", SchemaType::vec(SchemaType::U8)), // <--- "bytes"
+                ("memo", SchemaType::option(SchemaType::String)),
+            ],
+        );
+
+        // Build Borsh-encoded data:
+        // u8 vaultIndex = 4
+        // u8 ephemeralSigners = 1
+        // Vec<u8> transactionMessage = [1,2,3] (Borsh: u32 length + bytes)
+        // Option<String> memo = None (0u8)
+        let mut data = Vec::new();
+        data.push(4u8);
+        data.push(1u8);
+        (3u32).serialize(&mut data).unwrap();
+        data.extend_from_slice(&[1u8, 2u8, 3u8]);
+        data.push(0u8);
+
+        let node = schema
+            .deserialize_bytes(&mut data.as_slice(), true)
+            .unwrap()
+            .unwrap();
+
+        // Look up the `transactionMessage` field
+        if let crate::value::TypedValue::Struct(fields) = node.value.clone() {
+            let tm = fields
+                .iter()
+                .find(|f| f.name == "transactionMessage")
+                .expect("missing field");
+            match &tm.value {
+                crate::value::TypedValue::Bytes(b) => assert_eq!(b, &vec![1, 2, 3]),
+                other => panic!("expected Bytes, got: {:?}", other),
+            }
+        } else {
+            panic!("expected struct");
+        }
+    }
 }

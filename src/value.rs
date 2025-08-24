@@ -1,5 +1,3 @@
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use serde::{ser::SerializeMap, Serialize, Serializer};
 use solana_program::pubkey::Pubkey;
 
@@ -155,7 +153,7 @@ impl Serialize for TypedValue {
                 }
                 state.end()
             }
-            TypedValue::Bytes(v) => STANDARD.encode(v).serialize(serializer),
+            TypedValue::Bytes(v) => v.serialize(serializer),
         }
     }
 }

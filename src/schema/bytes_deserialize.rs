@@ -69,15 +69,35 @@ impl SchemaType {
                 }
                 values
             }),
-            SchemaType::Vec(t) => TypedValue::Vec({
-                // Vec discriminant is 4 bytes (u32)
-                let size = u32::deserialize_reader(&mut *bytes)?;
-                let mut values = Vec::with_capacity(size as usize);
-                for _ in 0..size {
-                    values.push(t.deserialize_bytes(&mut *bytes, show_hidden)?);
+            SchemaType::Vec(t) => {
+                // SPECIAL CASE: bytes => Vec<u8>  (Anchor "bytes" = Borsh Vec<u8>)
+                if matches!(**t, SchemaType::U8) {
+                    let size = u32::deserialize_reader(&mut *bytes)? as usize;
+
+                    if bytes.len() < size {
+                        return Err(anyhow::anyhow!(
+                            "Not enough bytes for Vec<u8>: need {}, have {}",
+                            size,
+                            bytes.len()
+                        ));
+                    }
+
+                    // Efficiently take next `size` bytes
+                    let (raw, rest) = bytes.split_at(size);
+                    let buf = raw.to_vec();
+                    *bytes = rest;
+
+                    TypedValue::Bytes(buf)
+                } else {
+                    // Generic Vec<T> path (unchanged)
+                    let size = u32::deserialize_reader(&mut *bytes)?;
+                    let mut values = Vec::with_capacity(size as usize);
+                    for _ in 0..size {
+                        values.push(t.deserialize_bytes(&mut *bytes, show_hidden)?);
+                    }
+                    TypedValue::Vec(values)
                 }
-                values
-            }),
+            }
             SchemaType::Struct(t) => TypedValue::Struct({
                 let mut values = Vec::with_capacity(t.len());
                 for t in t {
