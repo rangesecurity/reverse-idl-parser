@@ -3,7 +3,7 @@ use serde::{
     Serialize,
 };
 
-use crate::schema::{SchemaNode, SchemaType};
+use crate::schema::{SchemaNode, SchemaType, SmallVecLen};
 
 impl Serialize for SchemaNode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -42,6 +42,7 @@ impl SchemaType {
             SchemaType::Enum(_) => "enum",
             SchemaType::Vec(_) => "vec",
             SchemaType::Struct(_) => "struct",
+            SchemaType::SmallVec(_, _) => "smallvec",
         }
     }
 }
@@ -85,6 +86,23 @@ impl Serialize for SchemaType {
                 let mut state = serializer.serialize_map(Some(1))?;
                 state.serialize_entry("type:enum", &Variants { variants })?;
                 state.end()
+            }
+            SchemaType::SmallVec(len_ty, elem) => {
+                use serde::ser::SerializeMap;
+                let mut map = serializer.serialize_map(Some(1))?;
+                // Represent as: { "type:smallvec": { "len": "u8|u16", "elem": <SchemaType> } }
+                #[derive(serde::Serialize)]
+                struct SmallVecRepr<'a> {
+                    len: &'a str,
+                    #[serde(rename = "elem")]
+                    elem: &'a SchemaType,
+                }
+                let len_str = match len_ty {
+                    SmallVecLen::U8 => "u8",
+                    SmallVecLen::U16 => "u16",
+                };
+                map.serialize_entry("type:smallvec", &SmallVecRepr { len: len_str, elem })?;
+                map.end()
             }
             _ => Serialize::serialize(&self.typename(), serializer),
         }

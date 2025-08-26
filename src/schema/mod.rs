@@ -33,6 +33,12 @@ impl SchemaNode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, borsh::BorshDeserialize, borsh::BorshSerialize)]
+pub enum SmallVecLen {
+    U8,
+    U16,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum SchemaType {
@@ -58,6 +64,7 @@ pub enum SchemaType {
     Vec(Box<SchemaType>),
     Struct(Vec<SchemaNode>),
     Enum(Vec<SchemaNode>),
+    SmallVec(SmallVecLen, Box<SchemaType>),
 }
 
 impl SchemaType {

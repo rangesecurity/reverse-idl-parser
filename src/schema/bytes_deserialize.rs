@@ -1,5 +1,5 @@
 use crate::{
-    schema::{SchemaNode, SchemaType},
+    schema::{SchemaNode, SchemaType, SmallVecLen},
     value::{TypedValue, ValueNode},
 };
 use borsh::BorshDeserialize;
@@ -115,7 +115,98 @@ impl SchemaType {
                     .ok_or(anyhow::anyhow!("is_hidden shouldn't appear in Enum types"))?;
                 Box::new(value)
             }),
+            SchemaType::SmallVec(len_ty, elem) => {
+                // read length with the declared LenType
+                let len = match len_ty {
+                    SmallVecLen::U8 => u8::deserialize_reader(&mut *bytes)? as usize,
+                    SmallVecLen::U16 => u16::deserialize_reader(&mut *bytes)? as usize,
+                };
+
+                // Fast path for bytes: SmallVec<*, u8> => TypedValue::Bytes
+                if matches!(**elem, SchemaType::U8) {
+                    if bytes.len() < len {
+                        return Err(anyhow::anyhow!(
+                            "Not enough bytes for SmallVec<u8>: need {}, have {}",
+                            len,
+                            bytes.len()
+                        ));
+                    }
+                    let (raw, rest) = bytes.split_at(len);
+                    *bytes = rest;
+                    TypedValue::Bytes(raw.to_vec())
+                } else {
+                    let mut values = Vec::with_capacity(len);
+                    for _ in 0..len {
+                        values.push(elem.deserialize_bytes(&mut *bytes, show_hidden)?);
+                    }
+                    TypedValue::Vec(values)
+                }
+            }
         };
         Ok(value)
+    }
+}
+
+// at the bottom of src/schema/bytes_deserialize.rs
+#[cfg(test)]
+mod smallvec_bytes_tests {
+    use crate::schema::{SchemaType, SmallVecLen};
+    use crate::value::TypedValue;
+    use solana_program::pubkey::Pubkey;
+
+    #[test]
+    fn smallvec_u8_of_u8_returns_bytes() {
+        let ty = SchemaType::SmallVec(SmallVecLen::U8, Box::new(SchemaType::U8));
+        let mut buf: &[u8] = &[3, 10, 11, 12]; // len=3, payload 10,11,12
+        let v = ty.deserialize_bytes(&mut buf, false).expect("ok");
+        match v {
+            TypedValue::Bytes(b) => assert_eq!(b, vec![10, 11, 12]),
+            other => panic!("expected Bytes, got {:?}", other),
+        }
+        assert!(buf.is_empty(), "buffer fully consumed");
+    }
+
+    #[test]
+    fn smallvec_u16_of_u8_returns_bytes() {
+        let ty = SchemaType::SmallVec(SmallVecLen::U16, Box::new(SchemaType::U8));
+        let mut buf: &[u8] = &[3, 0, 9, 8, 7]; // len=3 (LE), payload 9,8,7
+        let v = ty.deserialize_bytes(&mut buf, false).expect("ok");
+        match v {
+            TypedValue::Bytes(b) => assert_eq!(b, vec![9, 8, 7]),
+            other => panic!("expected Bytes, got {:?}", other),
+        }
+        assert!(buf.is_empty(), "buffer fully consumed");
+    }
+
+    #[test]
+    fn smallvec_u8_of_pubkey_returns_vec_of_pubkeys() {
+        let ty = SchemaType::SmallVec(SmallVecLen::U8, Box::new(SchemaType::Pubkey));
+
+        let pk1 = [1u8; 32];
+        let pk2 = [2u8; 32];
+        let mut bytes = Vec::with_capacity(1 + 64);
+        bytes.push(2u8); // len
+        bytes.extend_from_slice(&pk1);
+        bytes.extend_from_slice(&pk2);
+
+        let mut buf: &[u8] = &bytes;
+        let v = ty.deserialize_bytes(&mut buf, false).expect("ok");
+        let expect1 = Pubkey::new_from_array(pk1).to_string();
+        let expect2 = Pubkey::new_from_array(pk2).to_string();
+
+        match v {
+            TypedValue::Vec(items) => {
+                assert_eq!(items.len(), 2);
+                match (&items[0], &items[1]) {
+                    (TypedValue::Pubkey(a), TypedValue::Pubkey(b)) => {
+                        assert_eq!(a, &expect1);
+                        assert_eq!(b, &expect2);
+                    }
+                    other => panic!("expected Vec<Pubkey>, got {:?}", other),
+                }
+            }
+            other => panic!("expected Vec, got {:?}", other),
+        }
+        assert!(buf.is_empty(), "buffer fully consumed");
     }
 }

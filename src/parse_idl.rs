@@ -9,7 +9,7 @@ use solana_program::hash::hash;
 
 use crate::{
     on_chain_idl::{InstructionDecoder, OnChainIdl},
-    schema::{SchemaNode, SchemaType},
+    schema::{SchemaNode, SchemaType, SmallVecLen},
 };
 
 pub fn parse_idl_file(file_path: &str) -> Result<OnChainIdl, Box<dyn std::error::Error>> {
@@ -466,6 +466,58 @@ impl IdlParser {
                 }
                 "defined" => {
                     let inner_type = value.as_str().ok_or("Defined type is not a string")?;
+
+                    // NEW: handle inline parametrized types like SmallVec<u8,Pubkey>
+                    if let Some(inner) = inner_type
+                        .strip_prefix("SmallVec<")
+                        .and_then(|s| s.strip_suffix('>'))
+                    {
+                        // inner looks like: "u8,Pubkey"  or "u16,u8"  etc.
+                        let mut parts = inner.split(',').map(|s| s.trim());
+                        let len_s = parts.next().ok_or("SmallVec missing len type")?;
+                        let elem_s = parts.next().ok_or("SmallVec missing elem type")?;
+                        if parts.next().is_some() {
+                            return Err("SmallVec has more than two generic params".into());
+                        }
+
+                        let len_ty = match len_s {
+                            "u8" => SmallVecLen::U8,
+                            "u16" => SmallVecLen::U16,
+                            other => {
+                                return Err(
+                                    format!("Unsupported SmallVec len type: {}", other).into()
+                                )
+                            }
+                        };
+
+                        // Try built-ins first (handle Pubkey/publicKey/case too)
+                        let elem_ty = match elem_s {
+                            s if s.eq_ignore_ascii_case("pubkey")
+                                || s.eq_ignore_ascii_case("publickey") =>
+                            {
+                                SchemaType::Pubkey
+                            }
+                            "string" => SchemaType::String,
+                            "i8" => SchemaType::I8,
+                            "u8" => SchemaType::U8,
+                            "i16" => SchemaType::I16,
+                            "u16" => SchemaType::U16,
+                            "i32" => SchemaType::I32,
+                            "u32" => SchemaType::U32,
+                            "i64" => SchemaType::I64,
+                            "u64" => SchemaType::U64,
+                            "i128" => SchemaType::I128,
+                            "u128" => SchemaType::U128,
+                            "f32" => SchemaType::F32,
+                            "f64" => SchemaType::F64,
+                            "bool" => SchemaType::Bool,
+                            // Otherwise it's a defined user type in the IDL
+                            other_defined => self.parse_type(other_defined)?.typ,
+                        };
+
+                        return Ok(SchemaType::SmallVec(len_ty, Box::new(elem_ty)));
+                    }
+
                     self.parse_type(inner_type)?.typ
                 }
                 _ => {
@@ -505,6 +557,10 @@ fn parse_raw_schema_type(name: &str) -> SchemaType {
 #[cfg(test)]
 mod test {
     use super::camel_to_snake_case;
+    use crate::{
+        parse_idl::parse_idl,
+        schema::{SchemaType, SmallVecLen},
+    };
     use solana_program::hash::hash;
 
     #[test]
@@ -525,5 +581,105 @@ mod test {
             "nft_metadata_update"
         );
         assert_eq!(camel_to_snake_case("doAbc123"), "do_abc123");
+    }
+
+    // Minimal IDL that:
+    //  - uses SmallVec<u8, Pubkey> directly in an instruction arg
+    //  - defines a CompiledInstruction type that itself uses SmallVec<u8,u8> and SmallVec<u16,u8>
+    //  - uses SmallVec<u8, CompiledInstruction> in an instruction arg (nested SmallVec)
+    fn smallvec_idl() -> String {
+        r#"{
+          "version": "1.0.0",
+          "name": "test_prog",
+          "instructions": [
+            {
+              "name": "foo",
+              "accounts": [{"name": "a", "isMut": false, "isSigner": false}],
+              "args": [
+                { "name": "msg", "type": { "defined": "SmallVec<u8,Pubkey>" } },
+                { "name": "ixs", "type": { "defined": "SmallVec<u8,CompiledInstruction>" } }
+              ]
+            }
+          ],
+          "types": [
+            {
+              "name": "CompiledInstruction",
+              "type": {
+                "kind": "struct",
+                "fields": [
+                  { "name": "programIdIndex", "type": "u8" },
+                  { "name": "accountIndexes", "type": { "defined": "SmallVec<u8,u8>" } },
+                  { "name": "data", "type": { "defined": "SmallVec<u16,u8>" } }
+                ]
+              }
+            }
+          ]
+        }"#
+        .to_string()
+    }
+
+    #[test]
+    fn parses_smallvec_definitions() {
+        let idl = parse_idl(smallvec_idl()).expect("parse_idl ok");
+
+        // one instruction, grab its schema
+        assert_eq!(idl.instruction_params.len(), 1);
+        let (_disc, dec) = &idl.instruction_params[0];
+        match &dec.instruction_args_parser.typ {
+            SchemaType::Struct(fields) => {
+                // msg: SmallVec<u8, Pubkey>
+                let msg = fields
+                    .iter()
+                    .find(|f| f.name == "msg")
+                    .expect("msg present");
+                match &msg.typ {
+                    SchemaType::SmallVec(len_ty, elem) => {
+                        assert!(matches!(len_ty, SmallVecLen::U8));
+                        assert!(matches!(&**elem, SchemaType::Pubkey));
+                    }
+                    other => panic!("msg wrong schema: {:?}", other),
+                }
+
+                // ixs: SmallVec<u8, CompiledInstruction>
+                let ixs = fields
+                    .iter()
+                    .find(|f| f.name == "ixs")
+                    .expect("ixs present");
+                match &ixs.typ {
+                    SchemaType::SmallVec(len_ty, elem) => {
+                        assert!(matches!(len_ty, SmallVecLen::U8));
+                        match &**elem {
+                            SchemaType::Struct(ci_fields) => {
+                                // inside CompiledInstruction, check its SmallVec fields too
+                                let acc_idx = ci_fields
+                                    .iter()
+                                    .find(|f| f.name == "accountIndexes")
+                                    .unwrap();
+                                match &acc_idx.typ {
+                                    SchemaType::SmallVec(len_ty, elem) => {
+                                        assert!(matches!(len_ty, SmallVecLen::U8));
+                                        assert!(matches!(&**elem, SchemaType::U8));
+                                    }
+                                    other => panic!("accountIndexes wrong schema: {:?}", other),
+                                }
+                                let data = ci_fields.iter().find(|f| f.name == "data").unwrap();
+                                match &data.typ {
+                                    SchemaType::SmallVec(len_ty, elem) => {
+                                        assert!(matches!(len_ty, SmallVecLen::U16));
+                                        assert!(matches!(&**elem, SchemaType::U8));
+                                    }
+                                    other => panic!("data wrong schema: {:?}", other),
+                                }
+                            }
+                            other => {
+                                panic!("ixs elem is not struct CompiledInstruction: {:?}", other)
+                            }
+                        }
+                    }
+                    other => panic!("ixs wrong schema: {:?}", other),
+                }
+            }
+            other => panic!("args not a struct: {:?}", other),
+        }
     }
 }

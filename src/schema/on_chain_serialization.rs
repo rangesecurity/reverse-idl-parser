@@ -1,3 +1,5 @@
+use crate::schema::SmallVecLen;
+
 use super::{SchemaNode, SchemaType};
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -47,6 +49,11 @@ impl BorshDeserialize for SchemaType {
                     _ => unreachable!(),
                 }
             }
+            22 => {
+                let len_ty = SmallVecLen::deserialize_reader(reader)?;
+                let elem = SchemaType::deserialize_reader(reader)?;
+                SchemaType::SmallVec(len_ty, Box::new(elem))
+            }
             _ => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -84,6 +91,7 @@ impl BorshSerialize for SchemaType {
             SchemaType::Vec(_) => 19,
             SchemaType::Struct(_) => 20,
             SchemaType::Enum(_) => 21,
+            SchemaType::SmallVec(_, _) => 22,
         };
         BorshSerialize::serialize(&tag, writer)?;
         match self {
@@ -114,6 +122,10 @@ impl BorshSerialize for SchemaType {
                 for typ in types {
                     BorshSerialize::serialize(typ, writer)?;
                 }
+            }
+            SchemaType::SmallVec(len_ty, typ) => {
+                borsh::BorshSerialize::serialize(len_ty, writer)?;
+                borsh::BorshSerialize::serialize(&**typ, writer)?;
             }
             _ => (),
         }
