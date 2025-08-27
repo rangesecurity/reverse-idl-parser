@@ -108,13 +108,23 @@ fn parse_account_schemas(
             .and_then(|v| v.as_str())
             .ok_or("Account name is not a string")?;
 
-        let (key, disc_type) = if let Some(disc) = account_map.get("discriminant") {
-            parse_explicit_discriminant(disc)?
-        } else {
-            parse_implicit_discriminant(account_name)?
-        };
+        // let (key, disc_type) = if let Some(disc) = account_map.get("discriminant") {
+        //     parse_explicit_discriminant(disc)?
+        // } else {
+        //     parse_implicit_discriminant(account_name)?
+        // };
 
-        account_disc_types.insert(disc_type);
+        // account_disc_types.insert(disc_type);
+        let (key, disc_len) = if let Some(disc) = account_map
+            .get("discriminant")
+            .or_else(|| account_map.get("discriminator"))
+        {
+            parse_any_discriminator(disc)?
+        } else {
+            let (key, _type_len) = parse_implicit_discriminant(account_name)?;
+            (key, 8u8)
+        };
+        account_disc_types.insert(disc_len as u64);
         accounts.insert(
             key,
             schema_map
@@ -137,18 +147,42 @@ fn parse_account_schemas(
     Ok((accounts, account_disc_len))
 }
 
-fn parse_explicit_discriminant(disc: &Value) -> Result<(u64, u64), Box<dyn std::error::Error>> {
-    let disc = disc.as_object().ok_or("Discriminant is not an object")?;
-    let typ = disc
-        .get("type")
-        .and_then(|v| v.as_str())
-        .ok_or("Discriminant type is not a string")?;
-    let disc_type = get_disc_from_str(typ);
-    let val = disc
-        .get("value")
-        .and_then(|v| v.as_u64())
-        .ok_or("Discriminant value is not a u64")?;
-    Ok((val, disc_type))
+// helper: accepts either object {"type": "...", "value": ...} or byte array [u8;N]
+// Returns (u64_value, disc_len_bytes)
+fn parse_any_discriminator(v: &serde_json::Value) -> Result<(u64, u8), Box<dyn std::error::Error>> {
+    if let Some(obj) = v.as_object() {
+        // legacy/new object form: { type: "u64"|"u8", value: <u64> }
+        let typ = obj
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or("Discriminant type is not a string")?;
+        let disc_type_len = match typ {
+            "u8" => 1u8,
+            "u64" => 8u8,
+            other => return Err(format!("Unknown discriminant type: {}", other).into()),
+        };
+        let val = obj
+            .get("value")
+            .and_then(|v| v.as_u64())
+            .ok_or("Discriminant value is not a u64")?;
+        return Ok((val, disc_type_len));
+    }
+
+    if let Some(arr) = v.as_array() {
+        // byte array form: [149, 0, 150, 1, ...]
+        // we interpret as little-endian; pad/truncate to 8 bytes to fit u64 (like your current reader).
+        let mut padded = [0u8; 8];
+        let n = arr.len().min(8);
+        for i in 0..n {
+            padded[i] = arr[i]
+                .as_u64()
+                .ok_or("Discriminator byte is not a number")? as u8;
+        }
+        let val = u64::from_le_bytes(padded);
+        return Ok((val, arr.len() as u8));
+    }
+
+    Err("Unsupported discriminator/discriminant value; expected object or byte array".into())
 }
 
 fn parse_implicit_discriminant(
@@ -198,13 +232,16 @@ fn parse_instructions(
             instruction_args_parser,
         };
 
-        let (key, disc_type) = if let Some(disc) = instruction_map.get("discriminant") {
-            parse_explicit_discriminant(disc)?
+        let (key, disc_len) = if let Some(disc) = instruction_map
+            .get("discriminant")
+            .or_else(|| instruction_map.get("discriminator"))
+        {
+            parse_any_discriminator(disc)?
         } else {
-            parse_implicit_instruction_discriminant(instruction_name)?
+            let (key, _type_len) = parse_implicit_instruction_discriminant(instruction_name)?;
+            (key, 8u8)
         };
-
-        instruction_disc_types.insert(disc_type);
+        instruction_disc_types.insert(disc_len as u64);
         instruction_params.insert(key, instruction_decoder);
     }
 
@@ -268,7 +305,7 @@ fn validate_on_chain_idl(on_chain_idl: &OnChainIdl) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-fn get_disc_from_str(s: &str) -> u64 {
+fn _get_disc_from_str(s: &str) -> u64 {
     match s {
         "u8" => 1,
         "u64" => 8,
