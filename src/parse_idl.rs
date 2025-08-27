@@ -75,6 +75,7 @@ fn parse_accounts(
         .get("accounts")
         .and_then(|s| s.as_array().cloned())
         .unwrap_or_default();
+
     for raw_account_map in account_map_list {
         let account_map = raw_account_map
             .as_object()
@@ -83,7 +84,14 @@ fn parse_accounts(
             .get("name")
             .and_then(|v| v.as_str())
             .ok_or("Account name is not a string")?;
-        idl_type_map.insert(account_name.to_string(), account_map.clone());
+
+        // Only merge if this account carries an inline layout (legacy style).
+        if account_map.get("type").is_some() {
+            // Don’t overwrite an existing proper type definition
+            idl_type_map
+                .entry(account_name.to_string())
+                .or_insert_with(|| account_map.clone());
+        }
     }
     Ok(())
 }
