@@ -55,13 +55,26 @@ impl SchemaType {
                     None
                 }
             })),
-            SchemaType::Array(size, t) => TypedValue::Array({
-                let mut values = Vec::with_capacity(*size);
-                for _ in 0..*size {
-                    values.push(t.deserialize_bytes(&mut *bytes, show_hidden)?);
+            SchemaType::Array(size, t) => {
+                if matches!(**t, SchemaType::U8) {
+                    if bytes.len() < *size {
+                        return Err(anyhow::anyhow!(
+                            "Not enough bytes for [u8; {}]: have {}",
+                            size,
+                            bytes.len()
+                        ));
+                    }
+                    let (raw, rest) = bytes.split_at(*size);
+                    *bytes = rest;
+                    TypedValue::Bytes(raw.to_vec())
+                } else {
+                    let mut values = Vec::with_capacity(*size);
+                    for _ in 0..*size {
+                        values.push(t.deserialize_bytes(&mut *bytes, show_hidden)?);
+                    }
+                    TypedValue::Array(values)
                 }
-                values
-            }),
+            }
             SchemaType::Tuple(t) => TypedValue::Tuple({
                 let mut values = Vec::with_capacity(t.len());
                 for t in t {
@@ -206,6 +219,18 @@ mod smallvec_bytes_tests {
                 }
             }
             other => panic!("expected Vec, got {:?}", other),
+        }
+        assert!(buf.is_empty(), "buffer fully consumed");
+    }
+
+    #[test]
+    fn array_u8_returns_bytes() {
+        let ty = SchemaType::Array(3, Box::new(SchemaType::U8));
+        let mut buf: &[u8] = &[1, 2, 3];
+        let v = ty.deserialize_bytes(&mut buf, false).expect("ok");
+        match v {
+            TypedValue::Bytes(b) => assert_eq!(b, vec![1, 2, 3]),
+            other => panic!("expected Bytes, got {:?}", other),
         }
         assert!(buf.is_empty(), "buffer fully consumed");
     }

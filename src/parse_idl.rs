@@ -483,12 +483,12 @@ impl IdlParser {
                 "vec" => SchemaType::vec(if value.is_object() {
                     self.parse_field_inner(value)?
                 } else {
-                    parse_raw_schema_type(value.as_str().ok_or("Vec type is not a string")?)
+                    parse_raw_schema_type(value.as_str().ok_or("Vec type is not a string")?)?
                 }),
                 "option" => SchemaType::option(if value.is_object() {
                     self.parse_field_inner(value)?
                 } else {
-                    parse_raw_schema_type(value.as_str().ok_or("Option type is not a string")?)
+                    parse_raw_schema_type(value.as_str().ok_or("Option type is not a string")?)?
                 }),
                 "array" => {
                     let inner_array = value.as_array().ok_or("Array is not an array")?;
@@ -505,7 +505,7 @@ impl IdlParser {
                             size,
                             parse_raw_schema_type(
                                 value.as_str().ok_or("Array type is not a string")?,
-                            ),
+                            )?,
                         )
                     }
                 }
@@ -571,14 +571,27 @@ impl IdlParser {
             }
         } else {
             let field_type_name = field_type.as_str().ok_or("Field type is not a string")?;
-            parse_raw_schema_type(field_type_name)
+            parse_raw_schema_type(field_type_name)?
         };
         Ok(schema_type)
     }
 }
 
-fn parse_raw_schema_type(name: &str) -> SchemaType {
-    match name {
+fn parse_raw_schema_type(name: &str) -> Result<SchemaType, Box<dyn std::error::Error>> {
+    // Support bracket-array shorthand like "[u8; 3]" or "[publicKey; 2]"
+    if let Some(inner) = name.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        let mut parts = inner.split(';');
+        let ty_s = parts.next().ok_or("Array missing element type")?.trim();
+        let len_s = parts.next().ok_or("Array missing length")?.trim();
+        if parts.next().is_some() {
+            return Err("Array syntax has extra parts".into());
+        }
+        let len: usize = len_s.parse::<usize>()?;
+        let elem = parse_raw_schema_type(ty_s)?;
+        return Ok(SchemaType::array(len, elem));
+    }
+
+    Ok(match name {
         "pubkey" | "publicKey" => SchemaType::Pubkey,
         "string" => SchemaType::String,
         "i8" => SchemaType::I8,
@@ -596,7 +609,7 @@ fn parse_raw_schema_type(name: &str) -> SchemaType {
         "bool" => SchemaType::Bool,
         "bytes" => SchemaType::Vec(Box::new(SchemaType::U8)),
         _ => panic!("Unknown type: {}", name),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -722,6 +735,47 @@ mod test {
                         }
                     }
                     other => panic!("ixs wrong schema: {:?}", other),
+                }
+            }
+            other => panic!("args not a struct: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_bracket_array_args() {
+        // Instruction args use the bracket shorthand
+        let json = r#"{
+      "version": "1.0.0",
+      "name": "arr_prog",
+      "instructions": [
+        {
+          "name": "bar",
+          "accounts": [],
+          "args": [
+            { "name": "three", "type": "[u8; 3]" },
+            { "name": "twoKeys", "type": "[publicKey; 2]" }
+          ]
+        }
+      ],
+      "types": []
+    }"#;
+
+        let idl = parse_idl(json.to_string()).expect("parse_idl ok");
+        assert_eq!(idl.instruction_params.len(), 1);
+
+        let (_disc, dec) = &idl.instruction_params[0];
+        match &dec.instruction_args_parser.typ {
+            SchemaType::Struct(fields) => {
+                let f_three = fields.iter().find(|f| f.name == "three").unwrap();
+                match &f_three.typ {
+                    SchemaType::Array(3, inner) => assert!(matches!(**inner, SchemaType::U8)),
+                    other => panic!("three wrong schema: {:?}", other),
+                }
+
+                let f_keys = fields.iter().find(|f| f.name == "twoKeys").unwrap();
+                match &f_keys.typ {
+                    SchemaType::Array(2, inner) => assert!(matches!(**inner, SchemaType::Pubkey)),
+                    other => panic!("twoKeys wrong schema: {:?}", other),
                 }
             }
             other => panic!("args not a struct: {:?}", other),
