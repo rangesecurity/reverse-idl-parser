@@ -54,6 +54,7 @@ impl BorshDeserialize for SchemaType {
                 let elem = SchemaType::deserialize_reader(reader)?;
                 SchemaType::SmallVec(len_ty, Box::new(elem))
             }
+            23 => SchemaType::RemainingBytes,
             _ => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -92,6 +93,7 @@ impl BorshSerialize for SchemaType {
             SchemaType::Struct(_) => 20,
             SchemaType::Enum(_) => 21,
             SchemaType::SmallVec(_, _) => 22,
+            SchemaType::RemainingBytes => 23,
         };
         BorshSerialize::serialize(&tag, writer)?;
         match self {

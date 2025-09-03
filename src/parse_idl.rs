@@ -608,6 +608,7 @@ fn parse_raw_schema_type(name: &str) -> Result<SchemaType, Box<dyn std::error::E
         "f64" => SchemaType::F64,
         "bool" => SchemaType::Bool,
         "bytes" => SchemaType::Vec(Box::new(SchemaType::U8)),
+        "bytes_remaining" | "rest" => SchemaType::RemainingBytes,
         _ => panic!("Unknown type: {}", name),
     })
 }

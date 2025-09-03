@@ -43,6 +43,7 @@ impl SchemaType {
             SchemaType::Vec(_) => "vec",
             SchemaType::Struct(_) => "struct",
             SchemaType::SmallVec(_, _) => "smallvec",
+            SchemaType::RemainingBytes => "bytes_remaining",
         }
     }
 }

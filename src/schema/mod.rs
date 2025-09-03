@@ -65,6 +65,7 @@ pub enum SchemaType {
     Struct(Vec<SchemaNode>),
     Enum(Vec<SchemaNode>),
     SmallVec(SmallVecLen, Box<SchemaType>),
+    RemainingBytes,
 }
 
 impl SchemaType {

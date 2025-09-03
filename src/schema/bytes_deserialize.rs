@@ -155,6 +155,12 @@ impl SchemaType {
                     TypedValue::Vec(values)
                 }
             }
+            SchemaType::RemainingBytes => {
+                // take everything that’s left
+                let out = bytes.to_vec();
+                *bytes = &[];
+                TypedValue::Bytes(out)
+            }
         };
         Ok(value)
     }
