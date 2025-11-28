@@ -423,6 +423,14 @@ impl IdlParser {
                 }
                 Ok(SchemaNode::new(type_name, SchemaType::Enum(nodes)))
             }
+            "alias" => {
+                // Type alias: parse the value field directly
+                let value = typ
+                    .get("value")
+                    .ok_or_else(|| format!("Alias {} missing value field", type_name))?;
+                let inner_type = self.parse_field_inner(value)?;
+                Ok(SchemaNode::new(type_name, inner_type))
+            }
             _ => Err("Unknown type kind".into()),
         }?;
         self.parsed_cache
@@ -510,7 +518,25 @@ impl IdlParser {
                     }
                 }
                 "defined" => {
-                    let inner_type = value.as_str().ok_or("Defined type is not a string")?;
+                    // Support both old format (string) and new format (object with name field)
+                    let inner_type = if value.is_string() {
+                        value
+                            .as_str()
+                            .ok_or("Defined type is not a string")?
+                            .to_string()
+                    } else if value.is_object() {
+                        value
+                            .as_object()
+                            .and_then(|obj| obj.get("name"))
+                            .and_then(|name| name.as_str())
+                            .ok_or("Defined object missing 'name' field")?
+                            .to_string()
+                    } else {
+                        return Err(
+                            "Defined type must be either a string or object with 'name' field"
+                                .into(),
+                        );
+                    };
 
                     // NEW: handle inline parametrized types like SmallVec<u8,Pubkey>
                     if let Some(inner) = inner_type
@@ -563,7 +589,7 @@ impl IdlParser {
                         return Ok(SchemaType::SmallVec(len_ty, Box::new(elem_ty)));
                     }
 
-                    self.parse_type(inner_type)?.typ
+                    self.parse_type(&inner_type)?.typ
                 }
                 _ => {
                     return Err("Unknown field type".into());

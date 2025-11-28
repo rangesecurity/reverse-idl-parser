@@ -1,4 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use std::collections::HashMap;
 
 use crate::{
     schema::{SchemaNode, SchemaType},
@@ -45,13 +46,15 @@ impl OnChainIdl {
             .ok_or(anyhow::anyhow!("Instruction discriminant not found"))?;
 
         let mut account_names = vec![];
-        for (i, _) in account_keys.iter().enumerate() {
+        let mut accounts_map = HashMap::new();
+        for (i, address) in account_keys.iter().enumerate() {
             let name = instruction_decoder
                 .accounts
                 .get(i)
                 .cloned()
                 .unwrap_or(format!("Account {}", i + 1));
-            account_names.push(name);
+            account_names.push(name.clone());
+            accounts_map.insert(name, address.clone());
         }
 
         let schema = instruction_decoder.instruction_args_parser.clone();
@@ -68,6 +71,7 @@ impl OnChainIdl {
         Ok(ParsedInstructionResult::new(
             schema,
             account_names,
+            accounts_map,
             args.value,
         ))
     }
@@ -121,15 +125,38 @@ pub struct ParsedInstructionResult {
     pub name: String,
     pub schema: SchemaType,
     pub accounts: Vec<String>,
+    #[serde(serialize_with = "serialize_accounts_map")]
+    pub accounts_map: HashMap<String, String>,
     pub value: TypedValue,
 }
 
+fn serialize_accounts_map<S>(
+    map: &HashMap<String, String>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeMap;
+    let mut map_serializer = serializer.serialize_map(Some(map.len()))?;
+    for (k, v) in map {
+        map_serializer.serialize_entry(k, v)?;
+    }
+    map_serializer.end()
+}
+
 impl ParsedInstructionResult {
-    pub fn new(schema: SchemaNode, accounts: Vec<String>, value: TypedValue) -> Self {
+    pub fn new(
+        schema: SchemaNode,
+        accounts: Vec<String>,
+        accounts_map: HashMap<String, String>,
+        value: TypedValue,
+    ) -> Self {
         Self {
             name: schema.name,
             schema: schema.typ,
             accounts,
+            accounts_map,
             value,
         }
     }
