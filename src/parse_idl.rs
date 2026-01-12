@@ -50,10 +50,12 @@ fn parse_types(
     root: &Map<String, Value>,
 ) -> Result<HashMap<String, Map<String, Value>>, Box<dyn std::error::Error>> {
     let mut idl_type_map = HashMap::new();
+    // Handle missing or null types field gracefully - some IDLs don't have custom types
     let type_map_list = root
         .get("types")
         .and_then(|v| v.as_array())
-        .ok_or("Types is not an array")?;
+        .cloned()
+        .unwrap_or_default();
     for raw_type_map in type_map_list {
         let type_map = raw_type_map
             .as_object()
@@ -807,5 +809,26 @@ mod test {
             }
             other => panic!("args not a struct: {:?}", other),
         }
+    }
+
+    #[test]
+    fn parses_idl_without_types_field() {
+        // IDL without types field (common in reverse-engineered IDLs)
+        let json = r#"{
+            "address": "C73nDAFn23RYwiFa6vtHshSbcg8x6BLYjw3bERJ3vHxf",
+            "metadata": {"name": "TestIDL", "spec": "0.1.0", "version": "1.0.0"},
+            "instructions": [
+                {
+                    "args": [{"name": "amount", "type": "u64"}],
+                    "name": "test_instruction",
+                    "accounts": [{"name": "account1"}],
+                    "discriminator": [66, 35, 129, 194, 203, 81, 108, 97]
+                }
+            ]
+        }"#;
+
+        let idl = parse_idl(json.to_string()).expect("should parse IDL without types field");
+        assert_eq!(idl.instruction_params.len(), 1);
+        assert_eq!(idl.program_name, "TestIDL");
     }
 }
