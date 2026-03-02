@@ -123,7 +123,14 @@ impl SchemaType {
             SchemaType::Enum(t) => TypedValue::Enum({
                 // Enum discriminant is 1 byte (u8)
                 let discriminant = u8::deserialize_reader(&mut *bytes)?;
-                let value = t[discriminant as usize]
+                let variant = t.get(discriminant as usize).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "enum discriminant {} out of bounds (variants: {})",
+                        discriminant,
+                        t.len()
+                    )
+                })?;
+                let value = variant
                     .deserialize_bytes(&mut *bytes, show_hidden)?
                     .ok_or(anyhow::anyhow!("is_hidden shouldn't appear in Enum types"))?;
                 Box::new(value)

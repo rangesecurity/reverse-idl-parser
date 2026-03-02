@@ -33,6 +33,11 @@ pub fn parse_idl(json_str: String) -> Result<OnChainIdl, Box<dyn std::error::Err
         program_name: root
             .get("name")
             .and_then(|v| v.as_str())
+            .or_else(|| {
+                root.get("metadata")
+                    .and_then(|m| m.get("name"))
+                    .and_then(|v| v.as_str())
+            })
             .unwrap_or_default()
             .to_string(),
         account_disc_len,
@@ -508,16 +513,14 @@ impl IdlParser {
                         .ok_or("Array size is not a u64")? as usize;
 
                     let value = inner_array.first().ok_or("Array value not found")?;
-                    if value.is_object() {
+                    let elem_type = if value.is_object() {
                         self.parse_field_inner(value)?
                     } else {
-                        SchemaType::array(
-                            size,
-                            parse_raw_schema_type(
-                                value.as_str().ok_or("Array type is not a string")?,
-                            )?,
-                        )
-                    }
+                        parse_raw_schema_type(
+                            value.as_str().ok_or("Array type is not a string")?,
+                        )?
+                    };
+                    SchemaType::array(size, elem_type)
                 }
                 "defined" => {
                     // Support both old format (string) and new format (object with name field)
